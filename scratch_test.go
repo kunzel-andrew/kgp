@@ -6,5 +6,5 @@ import (
 
 func TestScratch(t *testing.T){
 	extractConfig("config.json")
-	indexPage(Crawler{"https://www.golang.org/", 3})
+	indexPage(Crawler{"https://www.golang.org/", 0})
 }

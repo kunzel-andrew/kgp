@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -28,6 +29,15 @@ var seen = make(map[string]bool)
 type Crawler struct {
 	URI string
 	depth int
+}
+
+var indexCache = map[string]map[string]int{}
+
+var sitesIndexed int
+var wordsIndexed int
+type wordCount struct {
+	word string
+	count int
 }
 
 func homeLink(w http.ResponseWriter, r *http.Request) {
@@ -49,9 +59,12 @@ func indexPageHandler(w http.ResponseWriter, r *http.Request) {
 	indexPage(Crawler{parsedBody.URL, 0})
 }
 
-func indexPage(uri Crawler) {
+func indexPage(uri Crawler) (int, int){
 	//Set Up the Queue to do a Breadth First Search
 	queue := make(chan Crawler)
+	seen[uri.URI] = true
+	sitesIndexed = 0
+	wordsIndexed = 0
 
 	go func() {
 		queue <- uri
@@ -60,10 +73,13 @@ func indexPage(uri Crawler) {
 	for uri := range queue {
 		enqueue(uri, queue)
 	}
+
+	return sitesIndexed, wordsIndexed
 }
 
 func enqueue(uri Crawler, queue chan Crawler) {
 	fmt.Println("Indexing", uri.URI, "At Depth", uri.depth)
+	sitesIndexed += 1
 	seen[uri.URI] = true
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: true,
@@ -80,19 +96,27 @@ func enqueue(uri Crawler, queue chan Crawler) {
 	buf := new(bytes.Buffer)
 	buf.ReadFrom(resp.Body)
 	body := buf.String()
+	title := getTitleFromBody(body)
 
-	words:= getWordsFromBody(body)
+	words := getWordsFromBody(body)
 	fmt.Println("Words from the site: ", words)
+
+	urlCache, totalWords := mapReduceWords(words)
+	wordsIndexed += totalWords
+	updateCache(urlCache, title)
+
 	links := getLinksFromBody(body)
 	fmt.Println("Attempting to Crawl the following links:", links)
+
 	for _, link := range links {
 		absoluteLink, err := formatURL(link, uri.URI)
 		if err == nil && uri.URI != "" &&  canCrawl(absoluteLink) && !seen[absoluteLink] && uri.depth+1 < configuration.MaxDepth{
 			next := Crawler{absoluteLink, uri.depth+1}
+			seen[absoluteLink] = true
 			go func() { queue <- next }()
 		} else {
 			if !canCrawl(absoluteLink) {
-				fmt.Println("Cannot Crawl Legally Crawl Link ", absoluteLink)
+				fmt.Println("Cannot Legally Crawl Link ", absoluteLink)
 			} else if seen[absoluteLink] {
 				fmt.Println("Already seen link", absoluteLink, " Skipping")
 			} else if uri.depth+1 >= configuration.MaxDepth {
@@ -110,8 +134,8 @@ func canCrawl(URL string) bool{
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	resp, err := http.Get(parsedUrl.Scheme+"://"+parsedUrl.Host+"/robots.txt")
+	robotsURL := parsedUrl.Scheme+"://"+parsedUrl.Host+"/robots.txt"
+	resp, err := http.Get(robotsURL)
 	if err != nil {
 		return false
 	}
@@ -119,7 +143,8 @@ func canCrawl(URL string) bool{
 	data, err := robotstxt.FromResponse(resp)
 	resp.Body.Close()
 	if err != nil {
-		log.Println("Error parsing robots.txt", err.Error())
+		log.Println("Error parsing robots.txt for URL", robotsURL, err.Error())
+		return false
 	}
 	return data.TestAgent(URL, "Go-http-client/1.1")
 }
@@ -138,6 +163,14 @@ func formatURL(link string, base string) (string, error){
 		return "", errors.New("Cannot Format URL")
 	}
 	return formattedURL.String(), nil
+}
+func getTitleFromBody(body string) string {
+	document, err := goquery.NewDocumentFromReader(strings.NewReader(body))
+	if err != nil {
+		panic(err)
+	}
+	title := document.Find("title").Text()
+	return title
 }
 
 func getLinksFromBody(body string) []string {
@@ -184,6 +217,30 @@ func getWordsFromBody(body string) []string {
 	return words
 }
 
+func mapReduceWords(words []string) (map[string]int, int){
+	var data = make(map[string]int)
+
+	for _, word := range words {
+		word = strings.ToLower(word)
+		if match, _  := regexp.MatchString("^[a-z]+$", word); match {
+			count := data[word]
+			data[word] = count + 1
+		}
+
+	}
+
+	return data, len(data)
+}
+
+func updateCache(data map[string]int, title string) map[string]map[string]int{
+	for word, count := range data {
+		if _, found := indexCache[word]; !found {
+			indexCache[word] = make(map[string]int)
+		}
+		indexCache[word][title] = count
+	}
+	return indexCache
+}
 /*	var newEvent event
 
 	events = append(events, newEvent)

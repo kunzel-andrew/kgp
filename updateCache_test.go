@@ -7,6 +7,7 @@ import (
 
 
 func TestUpdateCache(t *testing.T){
+
 	fixtures := []struct{
 		data map[string]int
 		title string
@@ -27,7 +28,8 @@ func TestUpdateCache(t *testing.T){
 																								"b": map[string]int{"Test Title 1": 1, "Test Title 2": 1},
 																								"c": map[string]int{"Test Title 2": 1}}},
 	}
-
+	
+	deleteIndexHandler(nil, nil)
 	for _, fixture := range fixtures {
 		updatedCache := updateCache(fixture.data, fixture.title)
 		if !reflect.DeepEqual(updatedCache, fixture.cache) {

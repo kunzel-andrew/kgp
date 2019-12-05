@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -99,20 +101,21 @@ func enqueue(uri Crawler, queue chan Crawler) {
 	title := getTitleFromBody(body)
 
 	words := getWordsFromBody(body)
-	fmt.Println("Words from the site: ", words)
+
 
 	urlCache, totalWords := mapReduceWords(words)
 	wordsIndexed += totalWords
+	fmt.Println("Total Words Cached for Title", title, ":", strconv.Itoa(totalWords))
 	updateCache(urlCache, title)
 
 	links := getLinksFromBody(body)
-	fmt.Println("Attempting to Crawl the following links:", links)
 
 	for _, link := range links {
 		absoluteLink, err := formatURL(link, uri.URI)
 		if err == nil && uri.URI != "" &&  canCrawl(absoluteLink) && !seen[absoluteLink] && uri.depth+1 < configuration.MaxDepth{
 			next := Crawler{absoluteLink, uri.depth+1}
 			seen[absoluteLink] = true
+			fmt.Println("Added Link to crawl:", absoluteLink)
 			go func() { queue <- next }()
 		} else {
 			if !canCrawl(absoluteLink) {
@@ -241,13 +244,55 @@ func updateCache(data map[string]int, title string) map[string]map[string]int{
 	}
 	return indexCache
 }
-/*	var newEvent event
 
-	events = append(events, newEvent)
-	w.WriteHeader(http.StatusCreated)
 
-	json.NewEncoder(w).Encode(newEvent)*/
+func deleteIndexHandler(w http.ResponseWriter, r *http.Request) {
+	indexCache = make(map[string]map[string]int)
+}
 
+func searchIndexForWordHandler(w http.ResponseWriter, r *http.Request) {
+	type body struct {
+		word			string `json:"URL"`
+	}
+	var parsedBody body
+
+	reqBody, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		fmt.Fprintf(w, "Please provide a URL to index")
+	}
+	json.Unmarshal(reqBody, &parsedBody)
+
+	fmt.Println(searchIndexForWord(parsedBody.word))
+}
+
+func searchIndexForWord(word string) PairList {
+	if titles, ok := indexCache[word]; ok {
+		pl := make(PairList, len(titles))
+		i := 0
+		for k, v := range titles {
+			pl[i] = Pair{k,v}
+			i++
+		}
+		sort.Sort(sort.Reverse(pl))
+
+		return pl
+	}
+	return nil
+}
+
+type Pair struct {
+	key string
+	value int
+}
+type PairList []Pair
+
+func (p PairList) Len() int {return len(p)}
+func (p PairList) Less(i, j int) bool { if p[i].value == p[j].value {
+											return p[i].key < p[j].key
+										} else {
+											return p[i].value < p[j].value
+										} }
+func (p PairList) Swap(i,j int) { p[i], p[j] = p[j], p[i]}
 
 func main() {
 	extractConfig("config.json")
@@ -255,9 +300,8 @@ func main() {
 	router := mux.NewRouter().StrictSlash(true)
 	router.HandleFunc("/", homeLink)
 	router.HandleFunc("/index", indexPageHandler).Methods("POST")
-	//router.HandleFunc("/index", deleteIndex).Methods("DELETE")
-	//router.HandleFunc("/index/{url}", getIndexForURL).Methods("GET")
-	//router.HandleFunc("/search/{word}", searchIndexForWord).Methods("GET")
+	router.HandleFunc("/index", deleteIndexHandler).Methods("DELETE")
+	router.HandleFunc("/search/{word}", searchIndexForWordHandler).Methods("GET")
 	log.Fatal(http.ListenAndServe(":8080", router))
 }
 

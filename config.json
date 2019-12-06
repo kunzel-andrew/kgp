@@ -1,4 +1,6 @@
 {
   "MaxDepth": 3,
-  "Port": 8080
+  "MaxParallel": 2,
+  "Port": 8080,
+  "CrawlerAgent" : "Go-http-client/1.1"
 }

@@ -1,10 +1,10 @@
 package main
 
 import (
+	"net/http"
 	"reflect"
 	"testing"
 )
-
 
 func TestUpdateCache(t *testing.T){
 
@@ -28,8 +28,9 @@ func TestUpdateCache(t *testing.T){
 																								"b": map[string]int{"Test Title 1": 1, "Test Title 2": 1},
 																								"c": map[string]int{"Test Title 2": 1}}},
 	}
-	
-	deleteIndexHandler(nil, nil)
+	req, _ := http.NewRequest("DELETE", "/index", nil)
+	executeRequest(req)
+
 	for _, fixture := range fixtures {
 		updatedCache := updateCache(fixture.data, fixture.title)
 		if !reflect.DeepEqual(updatedCache, fixture.cache) {

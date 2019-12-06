@@ -23,9 +23,15 @@ import (
 )
 type Configuration struct{
 	MaxDepth	int
+	MaxParallel int
 	Port		int
+	CrawlerAgent string
 }
 var configuration Configuration
+type App struct {
+	Router *mux.Router
+}
+
 var seen = make(map[string]bool)
 
 type Crawler struct {
@@ -41,27 +47,29 @@ type wordCount struct {
 	word string
 	count int
 }
-
-func homeLink(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Welcome home!")
+type indexResponse struct{
+	sitesIndexed int
+	wordsIndexed int
 }
 
-func indexPageHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) indexPageHandler(w http.ResponseWriter, r *http.Request) {
 	type body struct {
 		URL			string `json:"URL"`
 	}
 	var parsedBody body
-
+	var response indexResponse
 	reqBody, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		fmt.Fprintf(w, "Please provide a URL to index")
+		respondWithError(w, http.StatusUnprocessableEntity, "Please include URL in Body of Request")
 	}
 	json.Unmarshal(reqBody, &parsedBody)
 
-	indexPage(Crawler{parsedBody.URL, 0})
+	response = indexPage(Crawler{parsedBody.URL, 0})
+	respondWithJSON(w, http.StatusOK, response)
+
 }
 
-func indexPage(uri Crawler) (int, int){
+func indexPage(uri Crawler) indexResponse {
 	//Set Up the Queue to do a Breadth First Search
 	queue := make(chan Crawler)
 	seen[uri.URI] = true
@@ -76,7 +84,7 @@ func indexPage(uri Crawler) (int, int){
 		enqueue(uri, queue)
 	}
 
-	return sitesIndexed, wordsIndexed
+	return indexResponse{sitesIndexed, wordsIndexed}
 }
 
 func enqueue(uri Crawler, queue chan Crawler) {
@@ -95,13 +103,13 @@ func enqueue(uri Crawler, queue chan Crawler) {
 		return
 	}
 	defer resp.Body.Close()
+
 	buf := new(bytes.Buffer)
 	buf.ReadFrom(resp.Body)
 	body := buf.String()
+
 	title := getTitleFromBody(body)
-
 	words := getWordsFromBody(body)
-
 
 	urlCache, totalWords := mapReduceWords(words)
 	wordsIndexed += totalWords
@@ -149,7 +157,7 @@ func canCrawl(URL string) bool{
 		log.Println("Error parsing robots.txt for URL", robotsURL, err.Error())
 		return false
 	}
-	return data.TestAgent(URL, "Go-http-client/1.1")
+	return data.TestAgent(URL, configuration.CrawlerAgent)
 }
 
 func formatURL(link string, base string) (string, error){
@@ -246,23 +254,17 @@ func updateCache(data map[string]int, title string) map[string]map[string]int{
 }
 
 
-func deleteIndexHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) deleteIndexHandler(w http.ResponseWriter, r *http.Request) {
 	indexCache = make(map[string]map[string]int)
+
+	respondWithJSON(w, http.StatusNoContent, "")
 }
 
-func searchIndexForWordHandler(w http.ResponseWriter, r *http.Request) {
-	type body struct {
-		word			string `json:"URL"`
-	}
-	var parsedBody body
-
-	reqBody, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		fmt.Fprintf(w, "Please provide a URL to index")
-	}
-	json.Unmarshal(reqBody, &parsedBody)
-
-	fmt.Println(searchIndexForWord(parsedBody.word))
+func (a *App) searchIndexForWordHandler(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	word, _ := params["word"]
+	response := searchIndexForWord(word)
+	respondWithJSON(w, http.StatusOK, response)
 }
 
 func searchIndexForWord(word string) PairList {
@@ -281,33 +283,51 @@ func searchIndexForWord(word string) PairList {
 }
 
 type Pair struct {
-	key string
-	value int
+	Title string
+	Count int
 }
 type PairList []Pair
 
 func (p PairList) Len() int {return len(p)}
-func (p PairList) Less(i, j int) bool { if p[i].value == p[j].value {
-											return p[i].key < p[j].key
+func (p PairList) Less(i, j int) bool { if p[i].Count == p[j].Count {
+											return p[i].Title < p[j].Title
 										} else {
-											return p[i].value < p[j].value
+											return p[i].Count < p[j].Count
 										} }
 func (p PairList) Swap(i,j int) { p[i], p[j] = p[j], p[i]}
 
-func main() {
+func (a *App) Initialize() {
 	extractConfig("config.json")
 
-	router := mux.NewRouter().StrictSlash(true)
-	router.HandleFunc("/", homeLink)
-	router.HandleFunc("/index", indexPageHandler).Methods("POST")
-	router.HandleFunc("/index", deleteIndexHandler).Methods("DELETE")
-	router.HandleFunc("/search/{word}", searchIndexForWordHandler).Methods("GET")
-	log.Fatal(http.ListenAndServe(":8080", router))
+	a.Router = mux.NewRouter().StrictSlash(true)
+	a.initializeRoutes()
 }
 
+func (a *App) Run(addr string) {
+	log.Fatal(http.ListenAndServe(":8000", a.Router))
+}
+
+func (a *App) initializeRoutes() {
+	a.Router.HandleFunc("/index", a.indexPageHandler).Methods("POST")
+	a.Router.HandleFunc("/index", a.deleteIndexHandler).Methods("DELETE")
+	a.Router.HandleFunc("/search/{word:[a-zA-Z]+}", a.searchIndexForWordHandler).Methods("GET")
+
+}
 func extractConfig(filename string) {
 	err := gonfig.GetConf(filename, &configuration)
 	if err != nil {
 		panic(err)
 	}
+}
+
+func respondWithError(w http.ResponseWriter, code int, message string) {
+	respondWithJSON(w, code, map[string]string{"error": message})
+}
+
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+	response, _ := json.Marshal(payload)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	w.Write(response)
 }

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"net/http"
 	"reflect"
 	"testing"
 )
@@ -28,8 +27,7 @@ func TestUpdateCache(t *testing.T){
 																								"b": map[string]int{"Test Title 1": 1, "Test Title 2": 1},
 																								"c": map[string]int{"Test Title 2": 1}}},
 	}
-	req, _ := http.NewRequest("DELETE", "/index", nil)
-	executeRequest(req)
+	indexCache = map[string]map[string]int{}
 
 	for _, fixture := range fixtures {
 		updatedCache := updateCache(fixture.data, fixture.title)

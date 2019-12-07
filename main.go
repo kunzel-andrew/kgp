@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/gorilla/mux"
@@ -28,11 +28,9 @@ type Configuration struct{
 	CrawlerAgent string
 }
 var configuration Configuration
-type App struct {
-	Router *mux.Router
-}
 
-var seen = make(map[string]bool)
+var seenMapMutex = sync.RWMutex{}
+var indexCashMutex = sync.RWMutex{}
 
 type Crawler struct {
 	URI string
@@ -48,61 +46,103 @@ type wordCount struct {
 	count int
 }
 type indexResponse struct{
-	sitesIndexed int
-	wordsIndexed int
+	SitesIndexed int
+	WordsIndexed int
 }
 
-func (a *App) indexPageHandler(w http.ResponseWriter, r *http.Request) {
+func indexPageHandler(w http.ResponseWriter, r *http.Request) {
 	type body struct {
 		URL			string `json:"URL"`
 	}
 	var parsedBody body
-	var response indexResponse
+	var response []indexResponse
+	var totals indexResponse
+
 	reqBody, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		respondWithError(w, http.StatusUnprocessableEntity, "Please include URL in Body of Request")
+		respondWithError(w, http.StatusUnprocessableEntity, "Unable to read Body")
 	}
+	defer r.Body.Close()
 	json.Unmarshal(reqBody, &parsedBody)
 
-	response = indexPage(Crawler{parsedBody.URL, 0})
-	respondWithJSON(w, http.StatusOK, response)
+	if parsedBody.URL == "" {
+		respondWithError(w, http.StatusUnprocessableEntity, "Please include URL in Body of Request")
+	} else {
+		fmt.Println("Beginning to index at:", parsedBody.URL)
+		response = crawl(Crawler{parsedBody.URL, 0}, configuration.MaxParallel,)
+		for _, entity := range response {
+			totals.SitesIndexed += entity.SitesIndexed
+			totals.WordsIndexed += entity.WordsIndexed
+		}
+		respondWithJSON(w, http.StatusOK, totals)
 
+	}
 }
-
-func indexPage(uri Crawler) indexResponse {
-	//Set Up the Queue to do a Breadth First Search
-	queue := make(chan Crawler)
-	seen[uri.URI] = true
-	sitesIndexed = 0
-	wordsIndexed = 0
-
-	go func() {
-		queue <- uri
-	}()
-
-	for uri := range queue {
-		enqueue(uri, queue)
+func crawl(startLink Crawler, concurrency int) []indexResponse {
+	results := []indexResponse{}
+	type linkList struct {
+		linkList 	[]string
+		depth 		int
 	}
+	worklist := make(chan linkList)
+	n := 1
 
-	return indexResponse{sitesIndexed, wordsIndexed}
+	var tokens = make(chan struct{}, concurrency)
+	go func() {worklist <- linkList{[]string{startLink.URI}, startLink.depth}}()
+	seen := make(map[string]bool)
+
+	finish := false
+	list := linkList{}
+	ok := false
+	for ; n > 0; n-- {
+		n ++
+		select {
+		case list, ok = <-worklist:
+			if ok {
+				fmt.Println("Got a new list")
+			}
+		default:
+			finish = true
+		}
+		depth := list.depth
+		for _, link := range list.linkList {
+			absoluteLink, err := formatURL(link, startLink.URI)
+			seenMapMutex.RLock()
+			seenLink, ok := seen[absoluteLink]
+			seenMapMutex.RUnlock()
+			if !ok{
+				seenLink = false
+			}
+			if err == nil && startLink.URI != "" && canCrawl(absoluteLink) && !seenLink && startLink.depth+1 < configuration.MaxDepth {
+				seenMapMutex.Lock()
+				seen[absoluteLink] = true
+				seenMapMutex.Unlock()
+
+				go func(link string, token chan struct{}) {
+					foundLinks, depth, pageResults := indexPage(Crawler{link, depth}, token)
+					results = append(results, pageResults)
+					if foundLinks != nil {
+						worklist <- linkList{foundLinks, depth}
+					} else if finish {
+						n=0
+					}
+				}(absoluteLink, tokens)
+			} else {
+				if !canCrawl(absoluteLink) {
+					fmt.Println("Cannot Legally Crawl Link ", absoluteLink)
+				} else if seen[absoluteLink] {
+					fmt.Println("Already seen link", absoluteLink, " Skipping")
+				}
+			}
+		}
+	}
+	return results
 }
-
-func enqueue(uri Crawler, queue chan Crawler) {
-	fmt.Println("Indexing", uri.URI, "At Depth", uri.depth)
-	sitesIndexed += 1
-	seen[uri.URI] = true
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: true,
-	}
-	transport := &http.Transport{
-		TLSClientConfig: tlsConfig,
-	}
-	client := http.Client{Transport: transport}
-	resp, err := client.Get(uri.URI)
-	if err != nil {
-		return
-	}
-	defer resp.Body.Close()
+func indexPage(uri Crawler, token chan struct{}) ([]string, int, indexResponse){
+	token <- struct{}{}
+		fmt.Println("Indexing: ", uri.URI, "at depth", strconv.Itoa(uri.depth))
+		resp, _ := getRequest(uri.URI)
+	<-token
 
 	buf := new(bytes.Buffer)
 	buf.ReadFrom(resp.Body)
@@ -112,30 +152,30 @@ func enqueue(uri Crawler, queue chan Crawler) {
 	words := getWordsFromBody(body)
 
 	urlCache, totalWords := mapReduceWords(words)
-	wordsIndexed += totalWords
 	fmt.Println("Total Words Cached for Title", title, ":", strconv.Itoa(totalWords))
 	updateCache(urlCache, title)
 
 	links := getLinksFromBody(body)
-
-	for _, link := range links {
-		absoluteLink, err := formatURL(link, uri.URI)
-		if err == nil && uri.URI != "" &&  canCrawl(absoluteLink) && !seen[absoluteLink] && uri.depth+1 < configuration.MaxDepth{
-			next := Crawler{absoluteLink, uri.depth+1}
-			seen[absoluteLink] = true
-			fmt.Println("Added Link to crawl:", absoluteLink)
-			go func() { queue <- next }()
-		} else {
-			if !canCrawl(absoluteLink) {
-				fmt.Println("Cannot Legally Crawl Link ", absoluteLink)
-			} else if seen[absoluteLink] {
-				fmt.Println("Already seen link", absoluteLink, " Skipping")
-			} else if uri.depth+1 >= configuration.MaxDepth {
-				fmt.Println("Not crawling links on this page because max depth has been reached")
-			}
-
-		}
+	//If Max Depth is reached don't continue adding links to the queue
+	if uri.depth >= configuration.MaxDepth {
+		links = nil
 	}
+	return links, uri.depth+1, indexResponse{1, totalWords}
+
+
+}
+
+func getRequest(uri string) (*http.Response, error) {
+	client := &http.Client{}
+	req, _ := http.NewRequest("GET", uri, nil)
+	req.Header.Set("User-Agent", configuration.CrawlerAgent)
+
+	res, err := client.Do(req)
+	if err != nil{
+		return nil, err
+	}
+
+	return res, nil
 }
 
 func canCrawl(URL string) bool{
@@ -175,6 +215,7 @@ func formatURL(link string, base string) (string, error){
 	}
 	return formattedURL.String(), nil
 }
+
 func getTitleFromBody(body string) string {
 	document, err := goquery.NewDocumentFromReader(strings.NewReader(body))
 	if err != nil {
@@ -245,25 +286,32 @@ func mapReduceWords(words []string) (map[string]int, int){
 
 func updateCache(data map[string]int, title string) map[string]map[string]int{
 	for word, count := range data {
+		indexCashMutex.RLock()
 		if _, found := indexCache[word]; !found {
 			indexCache[word] = make(map[string]int)
 		}
+		indexCashMutex.RUnlock()
+
+		indexCashMutex.Lock()
 		indexCache[word][title] = count
+		indexCashMutex.Unlock()
 	}
+
+
 	return indexCache
 }
 
 
-func (a *App) deleteIndexHandler(w http.ResponseWriter, r *http.Request) {
+func deleteIndexHandler(w http.ResponseWriter, r *http.Request) {
 	indexCache = make(map[string]map[string]int)
 
 	respondWithJSON(w, http.StatusNoContent, "")
 }
 
-func (a *App) searchIndexForWordHandler(w http.ResponseWriter, r *http.Request) {
+func searchIndexForWordHandler(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	word, _ := params["word"]
-	response := searchIndexForWord(word)
+	response := searchIndexForWord(strings.ToLower(word))
 	respondWithJSON(w, http.StatusOK, response)
 }
 
@@ -296,23 +344,22 @@ func (p PairList) Less(i, j int) bool { if p[i].Count == p[j].Count {
 										} }
 func (p PairList) Swap(i,j int) { p[i], p[j] = p[j], p[i]}
 
-func (a *App) Initialize() {
+func main() {
 	extractConfig("config.json")
 
-	a.Router = mux.NewRouter().StrictSlash(true)
-	a.initializeRoutes()
+	router := mux.NewRouter().StrictSlash(true)
+	router.HandleFunc("/", homeHandler)
+	router.HandleFunc("/index", indexPageHandler).Methods("POST")
+	router.HandleFunc("/index", deleteIndexHandler).Methods("DELETE")
+	router.HandleFunc("/search/{word}", searchIndexForWordHandler).Methods("GET")
+	log.Fatal(http.ListenAndServe(":8080", router))
 }
 
-func (a *App) Run(addr string) {
-	log.Fatal(http.ListenAndServe(":8000", a.Router))
+func homeHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("This is working")
+	respondWithJSON(w, 200, "Yay. Thanks")
 }
 
-func (a *App) initializeRoutes() {
-	a.Router.HandleFunc("/index", a.indexPageHandler).Methods("POST")
-	a.Router.HandleFunc("/index", a.deleteIndexHandler).Methods("DELETE")
-	a.Router.HandleFunc("/search/{word:[a-zA-Z]+}", a.searchIndexForWordHandler).Methods("GET")
-
-}
 func extractConfig(filename string) {
 	err := gonfig.GetConf(filename, &configuration)
 	if err != nil {
@@ -325,9 +372,9 @@ func respondWithError(w http.ResponseWriter, code int, message string) {
 }
 
 func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
-	response, _ := json.Marshal(payload)
-
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	w.WriteHeader(code)
-	w.Write(response)
+	if err:=json.NewEncoder(w).Encode(payload); err != nil {
+		fmt.Println("Error writing Payload: ", payload)
+	}
 }

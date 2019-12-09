@@ -11,7 +11,7 @@ import (
 
 func indexPageHandler(w http.ResponseWriter, r *http.Request) {
 	type body struct {
-		URL			string `json:"URL"`
+		URL string `json:"URL"`
 	}
 	var parsedBody body
 	var response []indexResponse
@@ -28,11 +28,11 @@ func indexPageHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusUnprocessableEntity, "Please include URL in Body of Request")
 	} else {
 		fmt.Println("Beginning to index at:", parsedBody.URL)
-		response = crawl(Crawler{parsedBody.URL, 0}, configuration.MaxParallel,)
-			for _, entity := range response {
-				totals.SitesIndexed += entity.SitesIndexed
-				totals.WordsIndexed += entity.WordsIndexed
-			}
+		response = crawl(Crawler{parsedBody.URL, 0}, configuration.MaxParallel)
+		for _, entity := range response {
+			totals.SitesIndexed += entity.SitesIndexed
+			totals.WordsIndexed += entity.WordsIndexed
+		}
 		respondWithJSON(w, http.StatusOK, totals)
 
 	}

@@ -18,21 +18,21 @@ import (
 func crawl(startLink Crawler, concurrency int) []indexResponse {
 	results := []indexResponse{}
 	type linkList struct {
-		linkList 	[]string
-		depth 		int
+		linkList []string
+		depth    int
 	}
 	worklist := make(chan linkList)
 	n := 1
 
 	var tokens = make(chan struct{}, concurrency)
-	go func() {worklist <- linkList{[]string{startLink.URI}, startLink.depth}}()
+	go func() { worklist <- linkList{[]string{startLink.URI}, startLink.depth} }()
 	seen := make(map[string]bool)
 
 	finish := false
 	list := linkList{}
 	ok := false
 	for ; n > 0; n-- {
-		n ++
+		n++
 		select {
 		case list, ok = <-worklist:
 			if ok {
@@ -47,7 +47,7 @@ func crawl(startLink Crawler, concurrency int) []indexResponse {
 			seenMapMutex.RLock()
 			seenLink, ok := seen[absoluteLink]
 			seenMapMutex.RUnlock()
-			if !ok{
+			if !ok {
 				seenLink = false
 			}
 			if err == nil && startLink.URI != "" && canCrawl(absoluteLink) && !seenLink && startLink.depth+1 < configuration.MaxDepth {
@@ -61,7 +61,7 @@ func crawl(startLink Crawler, concurrency int) []indexResponse {
 					if foundLinks != nil {
 						worklist <- linkList{foundLinks, depth}
 					} else if finish {
-						n=0
+						n = 0
 					}
 				}(absoluteLink, tokens)
 			} else {
@@ -76,7 +76,7 @@ func crawl(startLink Crawler, concurrency int) []indexResponse {
 	return results
 }
 
-func indexPage(uri Crawler, token chan struct{}) ([]string, int, indexResponse){
+func indexPage(uri Crawler, token chan struct{}) ([]string, int, indexResponse) {
 	token <- struct{}{}
 	fmt.Println("Indexing: ", uri.URI, "at depth", strconv.Itoa(uri.depth))
 	resp, _ := getRequest(uri.URI)
@@ -100,8 +100,7 @@ func indexPage(uri Crawler, token chan struct{}) ([]string, int, indexResponse){
 	if uri.depth >= configuration.MaxDepth {
 		links = nil
 	}
-	return links, uri.depth+1, indexResponse{1, totalWords}
-
+	return links, uri.depth + 1, indexResponse{1, totalWords}
 
 }
 
@@ -111,21 +110,21 @@ func getRequest(uri string) (*http.Response, error) {
 	req.Header.Set("User-Agent", configuration.CrawlerAgent)
 
 	res, err := client.Do(req)
-	if err != nil{
+	if err != nil {
 		return nil, err
 	}
 
 	return res, nil
 }
 
-func canCrawl(URL string) bool{
+func canCrawl(URL string) bool {
 	//Check robots.txt
 
 	parsedUrl, err := url.Parse(URL)
 	if err != nil {
 		log.Fatal(err)
 	}
-	robotsURL := parsedUrl.Scheme+"://"+parsedUrl.Host+"/robots.txt"
+	robotsURL := parsedUrl.Scheme + "://" + parsedUrl.Host + "/robots.txt"
 	resp, err := http.Get(robotsURL)
 	if err != nil {
 		return false
@@ -140,7 +139,7 @@ func canCrawl(URL string) bool{
 	return data.TestAgent(URL, configuration.CrawlerAgent)
 }
 
-func formatURL(link string, base string) (string, error){
+func formatURL(link string, base string) (string, error) {
 	baseURL, err := url.Parse(base)
 	if err != nil {
 		return "", err
@@ -173,7 +172,7 @@ func getLinksFromBody(body string) ([]string, error) {
 	var links []string
 	document.Find("a").Each(func(i int, s *goquery.Selection) {
 		href, exists := s.Attr("href")
-		if exists{
+		if exists {
 			links = append(links, href)
 		}
 	})
@@ -185,36 +184,36 @@ func getWordsFromBody(body string) ([]string, error) {
 	var words []string
 	domDoc := html.NewTokenizer(strings.NewReader(body))
 	startToken := domDoc.Token()
-	loopDom:
-		for {
-			tt:= domDoc.Next()
-			switch {
-			case tt == html.ErrorToken:
-				break loopDom
-			case tt == html.StartTagToken:
-				startToken = domDoc.Token()
-			case tt == html.TextToken:
-				if startToken.Data == "script" {
-					continue
-				}
-				textContent := strings.TrimSpace(html.UnescapeString(string(domDoc.Text())))
-				if len(textContent) > 0 {
-					wordStrings := strings.Fields(textContent)
-					for _, word := range wordStrings {
-						words = append(words, word)
-					}
+loopDom:
+	for {
+		tt := domDoc.Next()
+		switch {
+		case tt == html.ErrorToken:
+			break loopDom
+		case tt == html.StartTagToken:
+			startToken = domDoc.Token()
+		case tt == html.TextToken:
+			if startToken.Data == "script" {
+				continue
+			}
+			textContent := strings.TrimSpace(html.UnescapeString(string(domDoc.Text())))
+			if len(textContent) > 0 {
+				wordStrings := strings.Fields(textContent)
+				for _, word := range wordStrings {
+					words = append(words, word)
 				}
 			}
 		}
+	}
 	return words, nil
 }
 
-func mapReduceWords(words []string) (map[string]int, int){
+func mapReduceWords(words []string) (map[string]int, int) {
 	var data = make(map[string]int)
 
 	for _, word := range words {
 		word = strings.ToLower(word)
-		if match, _  := regexp.MatchString("^[a-z]+$", word); match {
+		if match, _ := regexp.MatchString("^[a-z]+$", word); match {
 			count := data[word]
 			data[word] = count + 1
 		}
@@ -224,7 +223,7 @@ func mapReduceWords(words []string) (map[string]int, int){
 	return data, len(data)
 }
 
-func updateCache(data map[string]int, title string) map[string]map[string]int{
+func updateCache(data map[string]int, title string) map[string]map[string]int {
 	for word, count := range data {
 		indexCashMutex.RLock()
 		if _, found := indexCache[word]; !found {
@@ -236,7 +235,6 @@ func updateCache(data map[string]int, title string) map[string]map[string]int{
 		indexCache[word][title] = count
 		indexCashMutex.Unlock()
 	}
-
 
 	return indexCache
 }

@@ -39,6 +39,8 @@ go build
 
 #### /index
 * `POST` : Index a Page
+    * Takes a JSON Body with the URL to start indexing as a parameter. 
+    * Returns a 422 if no URL is found in body
 * `DELETE`: Delete the Current Index Cache in Memory
 
 #### /search/:word

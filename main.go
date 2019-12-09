@@ -27,7 +27,12 @@ type Crawler struct {
 	depth int
 }
 
-var indexCache = map[string]map[string]int{}
+type indexCacheInfo struct {
+	Title string
+	URL   string
+}
+
+var indexCache = map[string]map[indexCacheInfo]int{}
 
 var sitesIndexed int
 var wordsIndexed int

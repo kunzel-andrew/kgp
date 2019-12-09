@@ -18,7 +18,7 @@ func searchIndexForWord(word string) PairList {
 }
 
 type Pair struct {
-	Title string
+	Title indexCacheInfo
 	Count int
 }
 type PairList []Pair
@@ -26,7 +26,7 @@ type PairList []Pair
 func (p PairList) Len() int { return len(p) }
 func (p PairList) Less(i, j int) bool {
 	if p[i].Count == p[j].Count {
-		return p[i].Title < p[j].Title
+		return p[i].Title.Title < p[j].Title.Title
 	} else {
 		return p[i].Count < p[j].Count
 	}

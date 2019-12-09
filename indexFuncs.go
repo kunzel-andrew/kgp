@@ -93,7 +93,7 @@ func indexPage(uri Crawler, token chan struct{}) ([]string, int, indexResponse) 
 
 	urlCache, totalWords := mapReduceWords(words)
 	fmt.Println("Total Words Cached for Title", title, ":", strconv.Itoa(totalWords))
-	updateCache(urlCache, title)
+	updateCache(urlCache, indexCacheInfo{title, uri.URI})
 
 	links, _ := getLinksFromBody(body)
 	//If Max Depth is reached don't continue adding links to the queue
@@ -160,7 +160,7 @@ func getTitleFromBody(body string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	title := document.Find("title").Text()
+	title := document.Find("Title").Text()
 	return title, nil
 }
 
@@ -223,16 +223,16 @@ func mapReduceWords(words []string) (map[string]int, int) {
 	return data, len(data)
 }
 
-func updateCache(data map[string]int, title string) map[string]map[string]int {
+func updateCache(data map[string]int, info indexCacheInfo) map[string]map[indexCacheInfo]int {
 	for word, count := range data {
 		indexCashMutex.RLock()
 		if _, found := indexCache[word]; !found {
-			indexCache[word] = make(map[string]int)
+			indexCache[word] = make(map[indexCacheInfo]int)
 		}
 		indexCashMutex.RUnlock()
 
 		indexCashMutex.Lock()
-		indexCache[word][title] = count
+		indexCache[word][info] = count
 		indexCashMutex.Unlock()
 	}
 

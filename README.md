@@ -43,3 +43,11 @@ go build
 
 #### /search/:word
 * `GET` : Search the Index Cache For A Given Word
+
+
+### Todo
+- [ ] Increase Test Coverage and Test Cases
+- [ ] Swagger Documentation
+- [ ] Persistent Cache
+- [ ] Dockerfile to generate Image
+- [ ] Security and Rate Limiting

@@ -6,23 +6,23 @@ import (
 )
 
 func TestSearchIndexForWord(t *testing.T) {
-	testCache := map[string]map[string]int{"a": {"Test Title 1": 2, "Test Title 2": 1, "Test Title 4": 3, "Test Title 5": 1},
-		"b": {"Test Title 1": 1, "Test Title 2": 1},
-		"c": {"Test Title 2": 1}}
+	testCache := map[string]map[indexCacheInfo]int{"a": {indexCacheInfo{"Test Title 1", "test.com"}: 2, indexCacheInfo{"Test Title 2", "test.com"}: 1, indexCacheInfo{"Test Title 4", "test.com"}: 3, indexCacheInfo{"Test Title 5", "test.com"}: 1},
+		"b": {indexCacheInfo{"Test Title 1", "test.com"}: 1, indexCacheInfo{"Test Title 2", "test.com"}: 1},
+		"c": {indexCacheInfo{"Test Title 2", "test.com"}: 1}}
 	fixtures := []struct {
 		word   string
-		cache  map[string]map[string]int
+		cache  map[string]map[indexCacheInfo]int
 		result PairList
 	}{
-		{"a", testCache, []Pair{{"Test Title 4", 3},
-			{"Test Title 1", 2},
-			{"Test Title 5", 1},
-			{"Test Title 2", 1}}},
+		{"a", testCache, []Pair{{indexCacheInfo{"Test Title 4", "test.com"}, 3},
+			{indexCacheInfo{"Test Title 1", "test.com"}, 2},
+			{indexCacheInfo{"Test Title 5", "test.com"}, 1},
+			{indexCacheInfo{"Test Title 2", "test.com"}, 1}}},
 		{"", testCache, nil},
 		{"d", testCache, nil},
 		{"a", nil, nil},
-		{"b", testCache, []Pair{{"Test Title 2", 1},
-			{"Test Title 1", 1}}},
+		{"b", testCache, []Pair{{indexCacheInfo{"Test Title 2", "test.com"}, 1},
+			{indexCacheInfo{"Test Title 1", "test.com"}, 1}}},
 	}
 
 	for _, fixture := range fixtures {

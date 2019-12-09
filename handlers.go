@@ -39,7 +39,7 @@ func indexPageHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func deleteIndexHandler(w http.ResponseWriter, r *http.Request) {
-	indexCache = make(map[string]map[string]int)
+	indexCache = make(map[string]map[indexCacheInfo]int)
 
 	respondWithJSON(w, http.StatusNoContent, "")
 }

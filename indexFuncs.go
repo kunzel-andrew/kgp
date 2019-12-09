@@ -75,6 +75,7 @@ func crawl(startLink Crawler, concurrency int) []indexResponse {
 	}
 	return results
 }
+
 func indexPage(uri Crawler, token chan struct{}) ([]string, int, indexResponse){
 	token <- struct{}{}
 	fmt.Println("Indexing: ", uri.URI, "at depth", strconv.Itoa(uri.depth))
@@ -82,17 +83,19 @@ func indexPage(uri Crawler, token chan struct{}) ([]string, int, indexResponse){
 	<-token
 
 	buf := new(bytes.Buffer)
-	buf.ReadFrom(resp.Body)
+	if resp.Body != nil {
+		buf.ReadFrom(resp.Body)
+	}
 	body := buf.String()
 
-	title := getTitleFromBody(body)
-	words := getWordsFromBody(body)
+	title, _ := getTitleFromBody(body)
+	words, _ := getWordsFromBody(body)
 
 	urlCache, totalWords := mapReduceWords(words)
 	fmt.Println("Total Words Cached for Title", title, ":", strconv.Itoa(totalWords))
 	updateCache(urlCache, title)
 
-	links := getLinksFromBody(body)
+	links, _ := getLinksFromBody(body)
 	//If Max Depth is reached don't continue adding links to the queue
 	if uri.depth >= configuration.MaxDepth {
 		links = nil
@@ -140,11 +143,11 @@ func canCrawl(URL string) bool{
 func formatURL(link string, base string) (string, error){
 	baseURL, err := url.Parse(base)
 	if err != nil {
-		panic(err)
+		return "", err
 	}
 	linkURL, err := url.Parse(link)
 	if err != nil {
-		panic(err)
+		return "", err
 	}
 	formattedURL := baseURL.ResolveReference(linkURL)
 	if formattedURL.Scheme == "" || formattedURL.Host == "" {
@@ -153,19 +156,19 @@ func formatURL(link string, base string) (string, error){
 	return formattedURL.String(), nil
 }
 
-func getTitleFromBody(body string) string {
+func getTitleFromBody(body string) (string, error) {
 	document, err := goquery.NewDocumentFromReader(strings.NewReader(body))
 	if err != nil {
-		panic(err)
+		return "", err
 	}
 	title := document.Find("title").Text()
-	return title
+	return title, nil
 }
 
-func getLinksFromBody(body string) []string {
+func getLinksFromBody(body string) ([]string, error) {
 	document, err := goquery.NewDocumentFromReader(strings.NewReader(body))
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	var links []string
 	document.Find("a").Each(func(i int, s *goquery.Selection) {
@@ -175,35 +178,35 @@ func getLinksFromBody(body string) []string {
 		}
 	})
 
-	return links
+	return links, nil
 }
 
-func getWordsFromBody(body string) []string {
+func getWordsFromBody(body string) ([]string, error) {
 	var words []string
 	domDoc := html.NewTokenizer(strings.NewReader(body))
 	startToken := domDoc.Token()
-loopDom:
-	for {
-		tt:= domDoc.Next()
-		switch {
-		case tt == html.ErrorToken:
-			break loopDom
-		case tt == html.StartTagToken:
-			startToken = domDoc.Token()
-		case tt == html.TextToken:
-			if startToken.Data == "script" {
-				continue
-			}
-			textContent := strings.TrimSpace(html.UnescapeString(string(domDoc.Text())))
-			if len(textContent) > 0 {
-				wordStrings := strings.Fields(textContent)
-				for _, word := range wordStrings {
-					words = append(words, word)
+	loopDom:
+		for {
+			tt:= domDoc.Next()
+			switch {
+			case tt == html.ErrorToken:
+				break loopDom
+			case tt == html.StartTagToken:
+				startToken = domDoc.Token()
+			case tt == html.TextToken:
+				if startToken.Data == "script" {
+					continue
+				}
+				textContent := strings.TrimSpace(html.UnescapeString(string(domDoc.Text())))
+				if len(textContent) > 0 {
+					wordStrings := strings.Fields(textContent)
+					for _, word := range wordStrings {
+						words = append(words, word)
+					}
 				}
 			}
 		}
-	}
-	return words
+	return words, nil
 }
 
 func mapReduceWords(words []string) (map[string]int, int){

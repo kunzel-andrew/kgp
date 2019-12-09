@@ -38,6 +38,7 @@ type indexResponse struct{
 	WordsIndexed int
 }
 
+
 func main() {
 	extractConfig("config.json")
 

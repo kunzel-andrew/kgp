@@ -3,9 +3,10 @@ A RESTful API to crawl the web, index it for word count and then search it.
 
 This is a small API to learn Go. It uses **gorilla/mux** for the API.
 
-##Author
+## Author
 Name: Andrew Kunzel
-[www.dl3consulting.com](www.dl3consulting.com)
+
+Website: [www.dl3consulting.com](http://www.dl3consulting.com)
 
 ## Installation & Run
 ```bash
